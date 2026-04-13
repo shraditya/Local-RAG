@@ -1,0 +1,89 @@
+import requests
+from typing import Optional, List, Any
+
+from langchain_core.language_models.llms import LLM
+from langchain_core.callbacks.manager import CallbackManagerForLLMRun
+
+
+class LlamaCppServerLLM(LLM):
+    base_url: str = "http://127.0.0.1:8001"
+    model: str = "unsloth/Qwen3.5-9B-GGUF"
+    temperature: float = 0.2
+    max_tokens: int = 4096
+    top_p: float = 0.95
+    stop: List[str] = [
+        "<|im_end|>",
+        "<|endoftext|>",
+        "</answer>",
+    ]
+    timeout: int = 1000
+
+    @property
+    def _llm_type(self) -> str:
+        return "llama_cpp_server"
+
+    def _format_prompt(self, prompt: str) -> str:
+        # Qwen chat-style formatting (important for better output)
+        return f"<|im_start|>user\n{prompt}<|im_end|>\n<|im_start|>assistant\n"
+
+    def _call(
+        self,
+        prompt: str,
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> str:
+        stop_sequences = stop or self.stop
+
+        formatted_prompt = self._format_prompt(prompt)
+
+        payload = {
+            "model": self.model,
+            "prompt": formatted_prompt,
+            "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            # ⚠️ stop can break sometimes — include only if needed
+        }
+
+        try:
+            response = requests.post(
+                f"{self.base_url}/v1/completions",
+                json=payload,
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+
+            data = response.json()
+
+            # Safety check
+            if "choices" not in data or not data["choices"]:
+                raise RuntimeError(f"Invalid response format: {data}")
+
+            return data["choices"][0]["text"].strip()
+
+        except requests.exceptions.ConnectionError:
+            raise RuntimeError(
+                f"Cannot connect to llama.cpp server at {self.base_url}"
+            )
+        except requests.exceptions.Timeout:
+            raise RuntimeError(
+                f"llama.cpp server timed out after {self.timeout}s"
+            )
+        except requests.exceptions.HTTPError as e:
+            try:
+                err = response.json()
+            except Exception:
+                err = response.text
+            raise RuntimeError(f"llama.cpp server error: {e} | {err}")
+        except Exception as e:
+            raise RuntimeError(f"Unexpected error: {e}")
+
+    @property
+    def _identifying_params(self) -> dict:
+        return {
+            "base_url": self.base_url,
+            "model": self.model,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+        }

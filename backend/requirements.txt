@@ -1,0 +1,14 @@
+streamlit
+ollama
+langchain
+langchain-community
+langchain-core
+langchain-huggingface
+langchain-ollama
+langchain-text-splitters
+chromadb
+sentence-transformers
+rank-bm25
+pdfplumber
+pypdf
+nltk
